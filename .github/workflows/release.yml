@@ -40,6 +40,13 @@ jobs:
       with:
         go-version: '1.24.x'
 
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: '20'
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+
     #---------------------------------------------------------------
     # 4 — Fix mirrors, add arm64 repos, install cross tool‑chain
     #---------------------------------------------------------------
@@ -82,7 +89,17 @@ jobs:
           ${{ runner.os }}-go-
 
     #---------------------------------------------------------------
-    # 6 — Build linux/amd64 binary
+    # 6 — Build frontend assets for embedding in the Go binary
+    #---------------------------------------------------------------
+    - name: Build frontend
+      working-directory: frontend
+      run: |
+        npm ci
+        npm run typecheck
+        npm run build
+
+    #---------------------------------------------------------------
+    # 7 — Build linux/amd64 binary
     #---------------------------------------------------------------
     - name: Build linux/amd64 binary
       run: |
@@ -95,7 +112,7 @@ jobs:
           -o dist/clab-api-server-linux-amd64 ./cmd/server
 
     #---------------------------------------------------------------
-    # 7 — Build linux/arm64 binary
+    # 8 — Build linux/arm64 binary
     #---------------------------------------------------------------
     - name: Build linux/arm64 binary
       env:
@@ -110,14 +127,14 @@ jobs:
           -o dist/clab-api-server-linux-arm64 ./cmd/server
 
     #---------------------------------------------------------------
-    # 8 — Make binaries executable (Optional but good practice)
+    # 9 — Make binaries executable (Optional but good practice)
     #---------------------------------------------------------------
     - name: Make binaries executable
       run: |
         chmod +x dist/clab-api-server-linux-*
 
     #---------------------------------------------------------------
-    # 9 — Verify release binary architectures before packaging
+    # 10 — Verify release binary architectures before packaging
     #---------------------------------------------------------------
     - name: Verify release binary architectures
       run: |
@@ -173,7 +190,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     #---------------------------------------------------------------
-    # 10 — Verify pushed multi-arch image
+    # 11 — Verify pushed multi-arch image
     #---------------------------------------------------------------
     - name: Verify pushed multi-arch image
       run: |
@@ -184,7 +201,7 @@ jobs:
         grep -q 'linux/arm64' /tmp/clab-api-server-image.txt
 
     #---------------------------------------------------------------
-    # 11 — Upload binaries to the GitHub Release page
+    # 12 — Upload binaries to the GitHub Release page
     #---------------------------------------------------------------
     - name: Upload Release Assets (Binaries)
       uses: softprops/action-gh-release@v3

@@ -24,9 +24,19 @@ function setup-env {
     mkdir -p "${DIST_DIR}"
 }
 
+function build-frontend {
+    echo "Building embedded web UI..."
+    if ! command -v npm &> /dev/null; then
+        echo "Error: npm not found. Install Node.js/npm to build the web UI."
+        exit 1
+    fi
+    (cd frontend && npm ci && npm run build)
+}
+
 # Build for local architecture
 function build-local {
     setup-env
+    build-frontend
     echo "Building clab-api-server for local architecture..."
     CGO_ENABLED=1 go build -trimpath -ldflags "-s -w \
         -X main.version=${VERSION} \
@@ -40,6 +50,7 @@ function build-local {
 # Build for linux/amd64
 function build-amd64 {
     setup-env
+    build-frontend
     echo "Building clab-api-server for linux/amd64..."
     CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags "-s -w \
@@ -54,6 +65,7 @@ function build-amd64 {
 # Build for linux/arm64 (requires cross-compilation tools)
 function build-arm64 {
     setup-env
+    build-frontend
     # Check if aarch64-linux-gnu-gcc is available
     if ! command -v aarch64-linux-gnu-gcc &> /dev/null; then
         echo "Error: aarch64-linux-gnu-gcc not found. Install with:"
@@ -103,6 +115,7 @@ function help {
   echo "  build-local          - Build for local architecture"
   echo "  build-amd64          - Build for linux/amd64"
   echo "  build-arm64          - Build for linux/arm64 (requires cross-tools)"
+  echo "  build-frontend       - Build embedded TypeScript web UI"
   echo "  build-all            - Build for all architectures"
   echo "  clean                - Clean build artifacts"
 }

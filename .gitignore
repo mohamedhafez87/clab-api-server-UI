@@ -24,6 +24,7 @@ clab-*.tar.gz
 
 # Dependency directories
 vendor/
+frontend/node_modules/
 
 # Build output
 *.exe
@@ -41,6 +42,7 @@ vendor/
 
 # Build
 dist/
+frontend/dist/
 
 # Ignore all env files
 .env
