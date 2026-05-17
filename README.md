@@ -21,11 +21,9 @@ A standalone RESTful API server for managing [Containerlab](https://containerlab
 * **Documentation:** Embedded Swagger UI and ReDoc for API exploration
 
 
-The latest Api endpoints documentation is published to GitHub Pages:
+The latest API endpoints documentation is published on GitHub Pages:
+**[Containerlab API Server Documentation](https://srl-labs.github.io/clab-api-server/)**
 
-```
-https://srl-labs.github.io/clab-api-server/
-```
 
 ---
 
@@ -35,7 +33,7 @@ https://srl-labs.github.io/clab-api-server/
 |-------------|-----------------|
 | **Linux** | Any modern distribution. The binaries target **amd64** and **arm64**. |
 | **PAM** | Uses the default `login` PAM service. No extra configuration needed on most distros. |
-| **User / Group** | Linux groups must exist as defined in your `.env` (`API_USER_GROUP`, `SUPERUSER_GROUP`). |
+| **User / Group** | Users must belong to the configured API or superuser group. The installer creates the default groups. |
 | **Docker** | Required for containerized deployment or when using Docker as container runtime |
 
 > [!NOTE]
@@ -45,7 +43,14 @@ https://srl-labs.github.io/clab-api-server/
 
 ## Deployment Options
 
-The Containerlab API Server can be deployed in several ways:
+Choose the method that matches how long the API server should live:
+
+| Method | Best for | Notes |
+|--------|----------|-------|
+| **Systemd installer** | Persistent lab hosts and GUI backends | Recommended for normal use. |
+| **Containerlab tools command** | Quick trials, demos, temporary access | Starts the API server as a container. |
+| **Direct binary / pull-only** | Debugging or custom supervision | You manage config and process lifetime. |
+| **Docker run** | Advanced container-managed deployments | You manage mounts, config, and lifecycle. |
 
 ### Installation Helper
 
@@ -64,51 +69,77 @@ The helper can:
 
 The helper asks before running privileged or runtime-changing commands. It does not write secrets to files; when a JWT secret is needed, it prompts for it.
 
-### 1. Run Binary Directly
+### 1. Systemd Installer
 
-Download the binary and run it directly with sudo:
-
-```bash
-# Download the latest release for your architecture
-curl -sLO https://github.com/srl-labs/clab-api-server/releases/latest/download/clab-api-server-linux-amd64
-
-# Make it executable
-chmod +x clab-api-server-linux-amd64
-
-# Run with sudo (required for container runtime access)
-sudo ./clab-api-server-linux-amd64
-```
-
-Configure via environment variables or a `.env` file in the current directory. See [Configuration Reference](#%EF%B8%8F-configuration-reference) for available options.
-
-Once the server is running, access the interactive API documentation at:
-- Web UI: `https://<server_ip>:<API_PORT>/app`
-- Swagger UI: `https://<server_ip>:<API_PORT>/swagger/index.html`
-- ReDoc UI: `https://<server_ip>:<API_PORT>/redoc`
-
-### 2. Binary Installation (systemd)
-
-Install as a systemd service for automatic startup:
+Install the latest release. The installer selects the correct `amd64` or `arm64` binary automatically:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/srl-labs/clab-api-server/main/install.sh | sudo -E bash
+curl -fsSL https://raw.githubusercontent.com/srl-labs/clab-api-server/main/install.sh | sudo bash -s -- install
 ```
 
 This will:
-- Download the appropriate binary for your architecture to `/usr/local/bin/clab-api-server`
-- Create a default configuration at `/etc/clab-api-server.env`
+- Download the binary to `/usr/local/bin/clab-api-server`
+- Create a default configuration at `/etc/clab-api-server/clab-api-server.env`
 - Create a systemd unit at `/etc/systemd/system/clab-api-server.service`
+- Create the default Linux groups `clab_api` and `clab_admins` if they do not exist
+- Generate a random `JWT_SECRET` for new installations
 
-For post-installation steps, see the [Post-Install Configuration](#-post-install-configuration) section below.
-
-Check for a newer API server release and upgrade the installed binary:
+Review the configuration and add users to the API group before starting the service:
 
 ```bash
-clab-api-server version check
-sudo clab-api-server version upgrade
+sudoedit /etc/clab-api-server/clab-api-server.env
+sudo usermod -aG clab_api <username>
+sudo systemctl enable --now clab-api-server
 ```
 
-### 3. Docker Deployment
+For an immediate start with the generated defaults, use `install --start`.
+
+The systemd service runs as `root` because the API server controls host container runtime resources, network namespaces, Linux users, and lab files.
+
+### 2. Containerlab Tools Command
+
+Use Containerlab's built-in command for quick trials or temporary API access:
+
+```bash
+# Start the API server as a container
+sudo containerlab tools api-server start [flags]
+
+# Stop the API server container
+sudo containerlab tools api-server stop
+
+# Check API server container status
+sudo containerlab tools api-server status
+```
+
+This method automatically handles Docker image pulling, container creation, and environment configuration.
+
+Common flags for the start command include:
+- `--port | -p`: Port to expose the API server on (default: `8090`)
+- `--host`: Host address for the API server (default: `localhost`)
+- `--labs-dir | -l`: Directory to mount as shared labs directory
+- `--jwt-secret`: JWT secret key for authentication, generated randomly if unset
+- `--tls-enable`: Enable TLS for HTTPS connections, enabled by default
+
+> [!NOTE]
+> The standalone systemd install and the Containerlab tools helper both default to port `8090` and HTTPS.
+
+### 3. Direct Binary / Pull-Only
+
+Use `pull-only` when you only want the architecture-specific binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/srl-labs/clab-api-server/main/install.sh | sudo bash -s -- pull-only
+```
+
+Then run it with your own process management:
+
+```bash
+sudo clab-api-server -env-file /path/to/clab-api-server.env
+```
+
+Configure via environment variables or a `.env` file. See [`.env.example`](./.env.example) and the [Configuration Reference](#configuration-reference) for available options.
+
+### 4. Docker Deployment
 
 Run the API server as a Docker container with access to the host resources:
 
@@ -132,48 +163,41 @@ docker run -d \
 > [!NOTE]
 > Volume mounts enable Docker management, networking features, Linux PAM authentication, and user file storage. No containerlab binary is required - it's integrated as a Go library.
 
-### 4. Containerlab Tools Command
+## Lifecycle Management
 
-Use Containerlab's built-in command to manage the API server directly:
+Check for a newer API server release and upgrade the installed binary:
 
 ```bash
-# Start the API server
-containerlab tools api-server start [flags]
-
-# Stop the API server
-containerlab tools api-server stop
-
-# Check API server status
-containerlab tools api-server status
+clab-api-server version check
+sudo clab-api-server version upgrade
 ```
 
-This method automatically handles Docker image pulling, container creation, and environment configuration.
+The installer can also upgrade to latest or replace the binary with a specific release tag. Installing an older tag is the supported downgrade path:
 
-Common flags for the start command include:
-- `--port | -p`: Port to expose the API server on (default: 8090)
-- `--host`: Host address for the API server (default: localhost)
-- `--labs-dir | -l`: Directory to mount as shared labs directory
-- `--jwt-secret`: JWT secret key for authentication
-- `--tls-enable`: Enable TLS for HTTPS connections
+```bash
+curl -fsSL https://raw.githubusercontent.com/srl-labs/clab-api-server/main/install.sh | sudo bash -s -- upgrade
+curl -fsSL https://raw.githubusercontent.com/srl-labs/clab-api-server/main/install.sh | sudo bash -s -- upgrade --version clab-0.73.0-api-0.2.1
+```
 
+Upgrade stops and restarts the service only if it was running before the upgrade.
 
-## Post-Install Configuration
+Uninstall removes the service and binary while keeping configuration by default:
 
-1. **Edit the configuration** (`/etc/clab-api-server.env` for binary install)
+```bash
+curl -fsSL https://raw.githubusercontent.com/srl-labs/clab-api-server/main/install.sh | sudo bash -s -- uninstall
+```
 
-   At a minimum, change `JWT_SECRET` to a strong random string and set `API_SERVER_HOST` to your server's IP/hostname.
+Remove the configuration intentionally with `--purge`:
 
-2. **Enable & start the service** (for binary installation):
+```bash
+curl -fsSL https://raw.githubusercontent.com/srl-labs/clab-api-server/main/install.sh | sudo bash -s -- uninstall --purge
+```
 
-   ```bash
-   sudo systemctl enable --now clab-api-server
-   ```
+After startup, verify the service:
 
-3. **Verify**
-
-   ```bash
-   sudo systemctl status clab-api-server
-   ```
+```bash
+sudo systemctl status clab-api-server
+```
 
 ## Automated Releases and Packages
 
@@ -212,7 +236,7 @@ ghcr.io/srl-labs/clab-api-server/clab-api-server:latest
 |----------|---------|-------------|
 | `API_PORT` | `8090` | Server listening port |
 | `API_SERVER_HOST` | `localhost` | Hostname/IP used in SSH access URLs |
-| `JWT_SECRET` | `please_change_me` | **CRITICAL**: Secret key for JWT token generation |
+| `JWT_SECRET` | generated by installer | **CRITICAL**: Secret key for JWT token generation |
 | `JWT_EXPIRATION` | `24h` | JWT token lifetime (e.g., "24h", "7d") |
 | `API_USER_GROUP` | `clab_api` | Linux group for API access |
 | `SUPERUSER_GROUP` | `clab_admins` | Linux group for elevated privileges |
@@ -250,6 +274,7 @@ When authenticating via the API, provide the Linux username and password to rece
 Access interactive API documentation at:
 
 ```
+https://<server_ip>:<API_PORT>/app                 # Web UI
 https://<server_ip>:<API_PORT>/swagger/index.html  # Swagger UI
 https://<server_ip>:<API_PORT>/redoc               # ReDoc UI
 ```
