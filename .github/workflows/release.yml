@@ -1,12 +1,26 @@
 name: Build and Release
 
 on:
+  push:
+    tags:
+      - 'clab-*'
+      - 'v*'
   release:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing tag to package and release'
+        required: true
+        type: string
 
 permissions:
   contents: write # Needed for uploading release assets
   packages: write # Needed for pushing packages (Docker images) to GHCR
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -20,14 +34,27 @@ jobs:
       uses: actions/checkout@v6
       with:
         fetch-depth: 0
+        ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
 
     #---------------------------------------------------------------
     # 2 — Export build‑time metadata (VERSION, COMMIT, DATE)
     #---------------------------------------------------------------
     - name: Export build metadata
       run: |
-        # Use the release tag name directly for VERSION
-        echo "VERSION=${{ github.event.release.tag_name }}" >>"$GITHUB_ENV"
+        set -euo pipefail
+        if [ "${{ github.event_name }}" = "release" ]; then
+          release_tag="${{ github.event.release.tag_name }}"
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          release_tag="${{ inputs.release_tag }}"
+        else
+          release_tag="${GITHUB_REF_NAME}"
+        fi
+        if ! git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null; then
+          echo "Release tag does not exist: ${release_tag}" >&2
+          exit 1
+        fi
+        echo "RELEASE_TAG=${release_tag}" >>"$GITHUB_ENV"
+        echo "VERSION=${release_tag}" >>"$GITHUB_ENV"
         echo "COMMIT=$(git rev-parse --short HEAD || echo unknown)" >>"$GITHUB_ENV"
         echo "DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >>"$GITHUB_ENV"
         echo "REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
@@ -39,6 +66,13 @@ jobs:
       uses: WillAbides/setup-go-faster@v1.15.0
       with:
         go-version: '1.24.x'
+
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: '20'
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
 
     #---------------------------------------------------------------
     # 4 — Fix mirrors, add arm64 repos, install cross tool‑chain
@@ -82,7 +116,17 @@ jobs:
           ${{ runner.os }}-go-
 
     #---------------------------------------------------------------
-    # 6 — Build linux/amd64 binary
+    # 6 — Build frontend assets for embedding in the Go binary
+    #---------------------------------------------------------------
+    - name: Build frontend
+      working-directory: frontend
+      run: |
+        npm ci
+        npm run typecheck
+        npm run build
+
+    #---------------------------------------------------------------
+    # 7 — Build linux/amd64 binary
     #---------------------------------------------------------------
     - name: Build linux/amd64 binary
       run: |
@@ -95,7 +139,7 @@ jobs:
           -o dist/clab-api-server-linux-amd64 ./cmd/server
 
     #---------------------------------------------------------------
-    # 7 — Build linux/arm64 binary
+    # 8 — Build linux/arm64 binary
     #---------------------------------------------------------------
     - name: Build linux/arm64 binary
       env:
@@ -110,14 +154,15 @@ jobs:
           -o dist/clab-api-server-linux-arm64 ./cmd/server
 
     #---------------------------------------------------------------
-    # 8 — Make binaries executable (Optional but good practice)
+    # 9 — Make binaries executable (Optional but good practice)
     #---------------------------------------------------------------
     - name: Make binaries executable
       run: |
         chmod +x dist/clab-api-server-linux-*
+        (cd dist && sha256sum clab-api-server-linux-amd64 clab-api-server-linux-arm64 > SHA256SUMS)
 
     #---------------------------------------------------------------
-    # 9 — Verify release binary architectures before packaging
+    # 10 — Verify release binary architectures before packaging
     #---------------------------------------------------------------
     - name: Verify release binary architectures
       run: |
@@ -152,7 +197,7 @@ jobs:
       with:
         images: ghcr.io/${{ env.REPO_LOWER }}/clab-api-server # Use lowercase repo name
         tags: |
-          type=raw,value=${{ github.event.release.tag_name }}
+          type=raw,value=${{ env.RELEASE_TAG }}
           type=raw,value=latest
           # Git SHA
           type=sha
@@ -173,23 +218,27 @@ jobs:
         cache-to: type=gha,mode=max
 
     #---------------------------------------------------------------
-    # 10 — Verify pushed multi-arch image
+    # 11 — Verify pushed multi-arch image
     #---------------------------------------------------------------
     - name: Verify pushed multi-arch image
       run: |
         set -euxo pipefail
-        image="ghcr.io/${REPO_LOWER}/clab-api-server:${{ github.event.release.tag_name }}"
+        image="ghcr.io/${REPO_LOWER}/clab-api-server:${RELEASE_TAG}"
         docker buildx imagetools inspect "$image" | tee /tmp/clab-api-server-image.txt
         grep -q 'linux/amd64' /tmp/clab-api-server-image.txt
         grep -q 'linux/arm64' /tmp/clab-api-server-image.txt
 
     #---------------------------------------------------------------
-    # 11 — Upload binaries to the GitHub Release page
+    # 12 — Upload binaries to the GitHub Release page
     #---------------------------------------------------------------
     - name: Upload Release Assets (Binaries)
       uses: softprops/action-gh-release@v3
       with:
-        tag_name: ${{ github.event.release.tag_name }}
+        tag_name: ${{ env.RELEASE_TAG }}
+        name: ${{ env.RELEASE_TAG }}
+        generate_release_notes: true
+        fail_on_unmatched_files: true
         files: |
           dist/clab-api-server-linux-amd64
           dist/clab-api-server-linux-arm64
+          dist/SHA256SUMS

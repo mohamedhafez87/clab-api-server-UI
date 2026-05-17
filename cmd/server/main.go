@@ -24,6 +24,7 @@ import (
 	"github.com/srl-labs/clab-api-server/internal/config"
 	"github.com/srl-labs/clab-api-server/internal/templates"
 	"github.com/srl-labs/clab-api-server/internal/tlsconfig"
+	"github.com/srl-labs/clab-api-server/internal/webui"
 )
 
 // --- Version Info ---
@@ -167,6 +168,9 @@ func main() {
 	// Setup API routes
 	router.Use(api.CORSMiddleware())
 	api.SetupRoutes(router)
+	if err := webui.Register(router); err != nil {
+		log.Fatalf("Failed to register embedded web UI: %v", err)
+	}
 
 	// Root handler (remains the same)
 	router.GET("/", func(c *gin.Context) {
@@ -183,6 +187,7 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{
 			"message":        fmt.Sprintf("Containerlab API Server (Version: %s) is running (%s).", version, protocol),
 			"documentation":  fmt.Sprintf("%s/swagger/index.html", baseURL),
+			"web_ui":         fmt.Sprintf("%s/app", baseURL),
 			"login_endpoint": fmt.Sprintf("POST %s/login", baseURL),
 			"api_base_path":  fmt.Sprintf("%s/api/v1", baseURL),
 			"clab_runtime":   config.AppConfig.ClabRuntime,
