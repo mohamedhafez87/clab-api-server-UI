@@ -47,6 +47,23 @@ https://srl-labs.github.io/clab-api-server/
 
 The Containerlab API Server can be deployed in several ways:
 
+### Installation Helper
+
+For an interactive menu that walks through the supported installation options, run:
+
+```bash
+./scripts/install-options.sh
+```
+
+The helper can:
+- install the release binary and systemd unit through `install.sh`
+- pull only the release binary
+- print or run the Docker deployment command
+- print or run `containerlab tools api-server start`
+- show post-install checks for the API docs, embedded UI, and health endpoint
+
+The helper asks before running privileged or runtime-changing commands. It does not write secrets to files; when a JWT secret is needed, it prompts for it.
+
 ### 1. Run Binary Directly
 
 Download the binary and run it directly with sudo:
@@ -65,6 +82,7 @@ sudo ./clab-api-server-linux-amd64
 Configure via environment variables or a `.env` file in the current directory. See [Configuration Reference](#%EF%B8%8F-configuration-reference) for available options.
 
 Once the server is running, access the interactive API documentation at:
+- Web UI: `https://<server_ip>:<API_PORT>/app`
 - Swagger UI: `https://<server_ip>:<API_PORT>/swagger/index.html`
 - ReDoc UI: `https://<server_ip>:<API_PORT>/redoc`
 
@@ -156,6 +174,37 @@ Common flags for the start command include:
    ```bash
    sudo systemctl status clab-api-server
    ```
+
+## Automated Releases and Packages
+
+The release workflow packages the server automatically when a release tag is pushed.
+
+Supported automatic triggers:
+- push a tag matching `clab-*` or `v*`
+- create a GitHub Release manually
+- run the `Build and Release` workflow manually with an existing tag
+
+For a normal release:
+
+```bash
+git tag clab-<clab-version>-api-<api-version>
+git push origin clab-<clab-version>-api-<api-version>
+```
+
+The workflow will:
+- build the TypeScript web UI and embed it in the Go binary
+- build linux/amd64 and linux/arm64 binaries
+- generate `SHA256SUMS`
+- create or update the GitHub Release for the tag
+- upload release binaries and checksums
+- build and push the multi-arch container image to GHCR
+
+The container package is published as:
+
+```text
+ghcr.io/srl-labs/clab-api-server/clab-api-server:<tag>
+ghcr.io/srl-labs/clab-api-server/clab-api-server:latest
+```
 
 ## Configuration Reference
 
